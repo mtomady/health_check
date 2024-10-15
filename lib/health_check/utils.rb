@@ -31,12 +31,19 @@ module HealthCheck
           when "emailconf"
             errors << HealthCheck::Utils.check_email if HealthCheck::Utils.mailer_configured?
           when "migrations", "migration"
-            if defined?(ActiveRecord::Migration) and ActiveRecord::Migration.respond_to?(:check_pending!)
+            if defined?(ActiveRecord::Migration) and ActiveRecord::Migration.respond_to?(:check_all_pending!)
+              # Rails 7.2+
+              begin
+                ActiveRecord::Migration.check_all_pending!
+              rescue ActiveRecord::PendingMigrationError => ex
+                errors << ex.message
+              end
+            elsif defined?(ActiveRecord::Migration) and ActiveRecord::Migration.respond_to?(:check_pending!)
               # Rails 4+
               begin
                 ActiveRecord::Migration.check_pending!
               rescue ActiveRecord::PendingMigrationError => ex
-                  errors << ex.message
+                errors << ex.message
               end
             else
               database_version  = HealthCheck::Utils.get_database_version
@@ -162,7 +169,7 @@ module HealthCheck
       t = Time.now.to_i
       value = "ok #{t}"
       ret = ::Rails.cache.read('__health_check_cache_test__')
-      if ret.to_s =~ /^ok (\d+)$/ 
+      if ret.to_s =~ /^ok (\d+)$/
         diff = ($1.to_i - t).abs
         return('Cache expiry is broken. ') if diff > 30
       elsif ret
@@ -170,7 +177,7 @@ module HealthCheck
       end
       if ::Rails.cache.write('__health_check_cache_test__', value, expires_in: 2.seconds)
         ret = ::Rails.cache.read('__health_check_cache_test__')
-        if ret =~ /^ok (\d+)$/ 
+        if ret =~ /^ok (\d+)$/
           diff = ($1.to_i - t).abs
           (diff < 2 ? '' : 'Out of date cache or time is skewed. ')
         else
